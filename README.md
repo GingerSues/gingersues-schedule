@@ -30,12 +30,11 @@ The scheduling app from Claude, rebuilt on Firebase so every employee can sign i
      Settings → Authorized domains → add `schedule.gingersues.com`.
    - Build → Hosting → Get started (just click through), then **Add custom domain** `schedule.gingersues.com`
      and add the DNS records it shows at your domain host.
-2. **Service account for GitHub:** Google Cloud console → IAM & Admin → Service Accounts →
-   `firebase-adminsdk-…` → Keys → Add key → JSON. In Google Cloud IAM give that account the **Owner** role on
-   this project only (deploys need to turn on Functions, Secret Manager and Cloud Build).
+2. **Let GitHub deploy (no key file):** open Google Cloud Shell on this project and run
+   `tools/setup-github-deploy.sh` (paste it in). It creates a `github-deploy` account with Owner on this project
+   only, which only this repository's GitHub Actions can use, and prints the two values for step 3.
 3. **GitHub repo settings → Secrets and variables → Actions**
-   - Variable `FIREBASE_PROJECT_ID` = your project ID
-   - Secret `FIREBASE_SERVICE_ACCOUNT` = the whole JSON key file
+   - Variables `FIREBASE_PROJECT_ID` and `WIF_PROVIDER` = the values the setup script printed
    - Secret `OWNER_PHONES` = your cell, e.g. `8165550123` (comma-separate more than one)
    - Secrets `TWILIO_SID`, `TWILIO_TOKEN`, `TWILIO_FROM` once Twilio approves texting
      (`TWILIO_FROM` can be the phone number or a Messaging Service SID starting `MG`).

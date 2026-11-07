@@ -1,7 +1,7 @@
 # Deploys the schedule to Firebase on every push to main (and on demand from the Actions tab).
 # Needs, in GitHub > Settings > Secrets and variables > Actions:
 #   Variable  FIREBASE_PROJECT_ID   e.g. gingersues-schedule
-#   Secret    FIREBASE_SERVICE_ACCOUNT  (the JSON key file contents)
+#   Variable  WIF_PROVIDER          printed by tools/setup-github-deploy.sh (keyless sign-in to Google)
 #   Secret    OWNER_PHONES          owner cell number(s), comma separated
 #   Secrets   TWILIO_SID, TWILIO_TOKEN, TWILIO_FROM   (leave out until Twilio is approved)
 name: Deploy
@@ -11,6 +11,10 @@ on:
   workflow_dispatch:
 
 concurrency: deploy
+
+permissions:
+  contents: read
+  id-token: write
 
 jobs:
   deploy:
@@ -28,12 +32,10 @@ jobs:
         working-directory: functions
         env:
           GCLOUD_PROJECT: ${{ vars.FIREBASE_PROJECT_ID }}
-      - name: Credentials
-        env:
-          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-        run: |
-          printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
-          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: github-deploy@${{ vars.FIREBASE_PROJECT_ID }}.iam.gserviceaccount.com
       - name: Sync secrets
         env:
           PROJECT: ${{ vars.FIREBASE_PROJECT_ID }}
@@ -50,5 +52,3 @@ jobs:
           rm -f "$RUNNER_TEMP/secret.txt"
       - name: Deploy
         run: npx firebase-tools deploy --project "${{ vars.FIREBASE_PROJECT_ID }}" --non-interactive --force
-      - if: always()
-        run: rm -f "$RUNNER_TEMP/sa.json"
