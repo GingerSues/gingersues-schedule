@@ -1,0 +1,54 @@
+# Deploys the schedule to Firebase on every push to main (and on demand from the Actions tab).
+# Needs, in GitHub > Settings > Secrets and variables > Actions:
+#   Variable  FIREBASE_PROJECT_ID   e.g. gingersues-schedule
+#   Secret    FIREBASE_SERVICE_ACCOUNT  (the JSON key file contents)
+#   Secret    OWNER_PHONES          owner cell number(s), comma separated
+#   Secrets   TWILIO_SID, TWILIO_TOKEN, TWILIO_FROM   (leave out until Twilio is approved)
+name: Deploy
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency: deploy
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: npm run build
+      - run: npm ci
+        working-directory: functions
+      - run: npm test
+        working-directory: functions
+        env:
+          GCLOUD_PROJECT: ${{ vars.FIREBASE_PROJECT_ID }}
+      - name: Credentials
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
+      - name: Sync secrets
+        env:
+          PROJECT: ${{ vars.FIREBASE_PROJECT_ID }}
+          OWNER_PHONES: ${{ secrets.OWNER_PHONES }}
+          TWILIO_SID: ${{ secrets.TWILIO_SID }}
+          TWILIO_TOKEN: ${{ secrets.TWILIO_TOKEN }}
+          TWILIO_FROM: ${{ secrets.TWILIO_FROM }}
+        run: |
+          for name in OWNER_PHONES TWILIO_SID TWILIO_TOKEN TWILIO_FROM; do
+            val="${!name}"; [ -z "$val" ] && val="unset"
+            printf '%s' "$val" > "$RUNNER_TEMP/secret.txt"
+            npx firebase-tools functions:secrets:set "$name" --project "$PROJECT" --data-file "$RUNNER_TEMP/secret.txt" --non-interactive
+          done
+          rm -f "$RUNNER_TEMP/secret.txt"
+      - name: Deploy
+        run: npx firebase-tools deploy --project "${{ vars.FIREBASE_PROJECT_ID }}" --non-interactive --force
+      - if: always()
+        run: rm -f "$RUNNER_TEMP/sa.json"

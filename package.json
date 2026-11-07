@@ -1,0 +1,18 @@
+{
+  "name": "gss-schedule",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "port": "python3 tools/port.py tools/artifact-source.html public/index.html",
+    "build": "node tools/build.mjs",
+    "build:test": "node tools/build.mjs --fake",
+    "test": "npm run build:test && node --test test/ && cd functions && npm test"
+  },
+  "dependencies": {
+    "firebase": "^10.14.1"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0",
+    "firebase-tools": "^14.27.0"
+  }
+}

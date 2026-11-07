@@ -1,0 +1,6 @@
+node_modules/
+test/site/
+test/shots/
+*.log
+.firebase/
+gss-export.json

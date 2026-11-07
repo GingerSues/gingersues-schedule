@@ -1,0 +1,100 @@
+rules_version = '2';
+
+// Who can see and change what.
+//   owner / manager: everything (roles come from users/{uid}, written only by Cloud Functions)
+//   employee: the team list, published shifts, messages, their own time off and requests,
+//             and their own availability. Never pay or phone numbers (kept in /private).
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function profPath() { return /databases/$(database)/documents/users/$(request.auth.uid); }
+    function hasProfile() { return signedIn() && exists(profPath()); }
+    function prof() { return get(profPath()).data; }
+    function role() { return hasProfile() ? prof().role : 'none'; }
+    function isMgr() { return role() in ['manager', 'owner']; }
+    function isStaff() { return role() in ['employee', 'manager', 'owner']; }
+    function myStaff() { return prof().get('staffId', ''); }
+    function changedOnly(keys) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
+    }
+    function mine(field) { return isStaff() && myStaff() != '' && field == myStaff(); }
+
+    match /users/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isMgr());
+      allow write: if false;
+    }
+
+    match /config/{id} {
+      allow read: if isStaff();
+      allow write: if isMgr();
+    }
+
+    match /staff/{id} {
+      allow read: if isStaff();
+      allow create: if isMgr()
+        && !request.resource.data.keys().hasAny(['wage', 'rates', 'phone', 'uid']);
+      allow update: if (isMgr()
+          && !request.resource.data.keys().hasAny(['wage', 'rates', 'phone'])
+          // managers may unlink an account, never link one (only the sign-in function does)
+          && (!('uid' in request.resource.data.diff(resource.data).affectedKeys()) || request.resource.data.uid == null))
+        || (mine(id) && changedOnly(['avail', 'maxHours']));
+      allow delete: if isMgr();
+    }
+
+    match /private/{id} {
+      allow read, write: if isMgr();
+    }
+
+    match /shifts/{id} {
+      allow read: if isMgr() || (isStaff() && resource.data.published == true);
+      allow write: if isMgr();
+    }
+
+    match /timeoff/{id} {
+      allow read: if isMgr() || mine(resource.data.staffId);
+      allow create: if isMgr()
+        || (mine(request.resource.data.staffId)
+            && request.resource.data.status == 'pending'
+            && request.resource.data.keys().hasOnly(['staffId', 'from', 'to', 'note', 'status', 'ts']));
+      allow update: if isMgr()
+        || (mine(resource.data.staffId) && changedOnly(['status']) && request.resource.data.status == 'cancelled');
+      allow delete: if isMgr();
+    }
+
+    match /requests/{id} {
+      allow read: if isMgr() || mine(resource.data.staffId) || mine(resource.data.targetId);
+      allow create: if isMgr()
+        || (mine(request.resource.data.staffId)
+            && request.resource.data.keys().hasOnly(['type', 'shiftId', 'staffId', 'targetId', 'note', 'status', 'date', 'start', 'end', 'loc', 'pos', 'ts'])
+            && ((request.resource.data.type in ['pickup', 'drop'] && request.resource.data.status == 'pending')
+                || (request.resource.data.type == 'cover' && request.resource.data.status == 'coworker'
+                    && request.resource.data.targetId is string && request.resource.data.targetId != myStaff())));
+      allow update: if isMgr()
+        || (mine(resource.data.staffId) && changedOnly(['status']) && request.resource.data.status == 'cancelled')
+        || (mine(resource.data.targetId) && resource.data.status == 'coworker'
+            && changedOnly(['status', 'acceptedTs']) && request.resource.data.status in ['pending', 'declined']);
+      allow delete: if isMgr();
+    }
+
+    match /messages/{id} {
+      allow read: if isStaff();
+      allow create: if isMgr()
+        || (mine(request.resource.data.staffId) && request.resource.data.text is string && request.resource.data.text.size() <= 2000);
+      allow update, delete: if isMgr();
+    }
+
+    match /publishEvents/{id} {
+      allow read: if isMgr();
+      allow create: if isMgr();
+    }
+
+    match /outbox/{id} {
+      allow read: if isMgr();
+    }
+
+    match /{col}/{id} {
+      allow read, write: if isMgr() && col in ['standard', 'forecast', 'emailImports', 'diag'];
+    }
+  }
+}
