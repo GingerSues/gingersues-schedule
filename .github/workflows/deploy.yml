@@ -60,3 +60,11 @@ jobs:
           done
       - name: Deploy
         run: npx firebase-tools deploy --project "${{ vars.FIREBASE_PROJECT_ID }}" --non-interactive --force
+      # The Workspace org blocks "allUsers" on Cloud Run, so the two functions the sign-in page calls
+      # are opened by turning off Cloud Run's invoker check instead. They verify the signed-in user themselves.
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Keep sign-in functions reachable
+        run: |
+          for s in linkaccount testtext; do
+            gcloud run services update "$s" --region us-central1 --project "${{ vars.FIREBASE_PROJECT_ID }}" --no-invoker-iam-check -q
+          done
