@@ -1,6 +1,6 @@
 {
   "firestore": { "rules": "firestore.rules", "indexes": "firestore.indexes.json" },
-  "functions": [{ "source": "functions", "runtime": "nodejs20", "ignore": ["node_modules", "test", ".git"] }],
+  "functions": [{ "source": "functions", "runtime": "nodejs22", "ignore": ["node_modules", "test", ".git"] }],
   "hosting": {
     "public": "public",
     "ignore": ["firebase.json", "**/.*"],
