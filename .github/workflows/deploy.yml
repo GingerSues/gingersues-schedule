@@ -50,5 +50,13 @@ jobs:
             npx firebase-tools functions:secrets:set "$name" --project "$PROJECT" --data-file "$RUNNER_TEMP/secret.txt" --non-interactive
           done
           rm -f "$RUNNER_TEMP/secret.txt"
+      # A failed first deploy can leave trigger functions half-made (as plain web functions).
+      # A push whose message contains [reset-triggers] deletes them first so they are made fresh.
+      - name: Reset trigger functions
+        if: contains(github.event.head_commit.message, '[reset-triggers]')
+        run: |
+          for f in syncRole phoneChanged onPublish onShiftUpdate onShiftDelete onTimeoffUpdate onRequestCreate onRequestUpdate; do
+            npx firebase-tools functions:delete "$f" --region us-central1 --project "${{ vars.FIREBASE_PROJECT_ID }}" --force --non-interactive || echo "($f was not there)"
+          done
       - name: Deploy
         run: npx firebase-tools deploy --project "${{ vars.FIREBASE_PROJECT_ID }}" --non-interactive --force
