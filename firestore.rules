@@ -37,7 +37,7 @@ service cloud.firestore {
       allow update: if (isMgr()
           && !request.resource.data.keys().hasAny(['wage', 'rates', 'phone'])
           // managers may unlink an account, never link one (only the sign-in function does)
-          && (!('uid' in request.resource.data.diff(resource.data).affectedKeys()) || request.resource.data.uid == null))
+          && (!('uid' in request.resource.data.diff(resource.data).affectedKeys()) || request.resource.data.get('uid', null) == null))
         || (mine(id) && changedOnly(['avail', 'maxHours']));
       allow delete: if isMgr();
     }

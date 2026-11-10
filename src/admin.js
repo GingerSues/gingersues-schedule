@@ -61,7 +61,7 @@ boot({
             const priv = {}; for (const k of PAY_KEYS) if (k in data) { priv[k] = data[k]; delete data[k]; }
             delete data.uid; // old Claude sign-ins don't carry over
             if ("phone" in priv) priv.phone = normPhone(priv.phone);
-            ops.push([["staff", id], data]);
+            ops.push([["staff", id], data, { merge: true }]); // merge keeps the sign-in link (uid)
             ops.push([["private", id], priv, { merge: true }]);
           } else ops.push([[col, id], data]);
         }
