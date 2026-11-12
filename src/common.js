@@ -30,6 +30,8 @@ const GATE_CSS = `
 .gate-card .btn{justify-content:center;min-height:44px}
 .gate-msg{font-size:14px;min-height:1.4em}
 .gate-msg.bad{color:var(--bad,#b42318)}
+.gate-legal{font-size:12px;line-height:1.5;color:var(--muted,#5b6672);margin:0}
+.gate-legal a{color:inherit}
 .gss-foot{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;font-size:13px;color:var(--muted,#5b6672);padding-bottom:32px}
 .gss-foot a{color:inherit}
 .gss-foot .btn{font-size:13px}
@@ -58,7 +60,8 @@ export async function boot({ onReady, title = "Schedule" }) {
         <button class="btn primary" id="g-send" type="submit">Text me a code</button></form>
       <form id="g-code" hidden novalidate><label class="f">Code from the text<input id="g-otp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]*" required></label>
         <button class="btn primary" type="submit" id="g-verify">Sign in</button><button type="button" class="btn" id="g-back">Use a different number</button></form>
-      <p class="gate-msg" id="g-msg"></p>`;
+      <p class="gate-msg" id="g-msg"></p>
+      <p class="gate-legal">By signing in, you agree to receive Ginger Sue's Schedule Alerts texts about your work schedule. Message frequency varies. Message and data rates may apply. Reply STOP to opt out, HELP for help. <a href="/terms">Terms &amp; Conditions</a> · <a href="/privacy">Privacy Policy</a></p>`;
     if (note) msg(note, true);
     let confirmation = null, verifier = null;
     const getVerifier = () => verifier || (verifier = new RecaptchaVerifier(auth, "g-send", { size: "invisible" }));
@@ -117,7 +120,7 @@ export async function boot({ onReady, title = "Schedule" }) {
     started = true;
     gate.remove();
     const foot = document.createElement("footer"); foot.className = "wrap gss-foot";
-    foot.innerHTML = `<span>Signed in as ${esc(prettyPhone(u.phoneNumber))}</span>${profile.role === "owner" ? `<a href="/admin.html">Owner tools</a>` : ""}<button class="btn sm" type="button" id="gss-out">Sign out</button>`;
+    foot.innerHTML = `<span>Signed in as ${esc(prettyPhone(u.phoneNumber))}</span>${profile.role === "owner" ? `<a href="/admin.html">Owner tools</a>` : ""}<a href="/privacy">Privacy</a><a href="/terms">Terms</a><button class="btn sm" type="button" id="gss-out">Sign out</button>`;
     document.body.appendChild(foot);
     foot.querySelector("#gss-out").addEventListener("click", () => signOut(auth));
     onReady({ app, auth, db, fns, user: u, profile });
