@@ -61,7 +61,7 @@ export async function boot({ onReady, title = "Schedule" }) {
       <form id="g-code" hidden novalidate><label class="f">Code from the text<input id="g-otp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]*" required></label>
         <button class="btn primary" type="submit" id="g-verify">Sign in</button><button type="button" class="btn" id="g-back">Use a different number</button></form>
       <p class="gate-msg" id="g-msg"></p>
-      <p class="gate-legal">By signing in, you agree to receive Ginger Sue's Schedule Alerts texts about your work schedule. Message frequency varies. Message and data rates may apply. Reply STOP to opt out, HELP for help. <a href="/terms">Terms &amp; Conditions</a> · <a href="/privacy">Privacy Policy</a></p>`;
+      <p class="gate-legal">By signing in, you agree to receive Ginger Sue's Schedule Alerts texts about your work schedule from Bradley-Fuller, Inc (Ginger Sue's). Message frequency varies. Message and data rates may apply. Reply STOP to opt out, HELP for help. <a href="/terms">Terms &amp; Conditions</a> · <a href="/privacy">Privacy Policy</a></p>`;
     if (note) msg(note, true);
     let confirmation = null, verifier = null;
     const getVerifier = () => verifier || (verifier = new RecaptchaVerifier(auth, "g-send", { size: "invisible" }));
