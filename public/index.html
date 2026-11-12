@@ -173,6 +173,9 @@ textarea{resize:vertical;min-height:72px}
 .fgrid .full{grid-column:1/-1}
 @media (max-width:520px){.fgrid{grid-template-columns:minmax(0,1fr)}}
 .checks{display:flex;flex-wrap:wrap;gap:6px}
+.pubmode{border:1px solid var(--line);border-radius:10px;padding:8px 12px 10px;margin:4px 0 0;display:grid;gap:8px}
+.pubmode legend{font-weight:600;padding:0 4px}
+.pubmode label{display:flex;gap:8px;align-items:baseline;cursor:pointer}
 .checks label{display:inline-flex;align-items:center;gap:6px;padding:5px 9px;border:1px solid var(--line);border-radius:7px;font-size:13px;font-weight:500;color:var(--ink);cursor:pointer}
 .checks input{accent-color:var(--accent)}
 .tpls{display:flex;flex-wrap:wrap;gap:6px}
@@ -264,7 +267,7 @@ const S = {
   tab: store.get("tab","schedule"), loc: store.get("loc","all"), ws: monday(today()),
   std:false, viewAs: null, msgLoc:"all", reqView:"pending", loaded:{}
 };
-const R = {config:null, staff:{}, shifts:{}, standard:{}, timeoff:{}, requests:{}, messages:{}, forecast:{}, emailImports:{}};
+const R = {config:null, staff:{}, shifts:{}, standard:{}, timeoff:{}, requests:{}, messages:{}, forecast:{}, emailImports:{}, notify:{}};
 let D = null;
 const X = () => S.demo ? D : R;
 const cfg = () => (S.tab==="settings" && pendingCfg) || X().config || DEFAULT_CONFIG;
@@ -404,6 +407,7 @@ function vBody(){
 
 /* ---------- schedule ---------- */
 function weekDays(){ return [...Array(7)].map((_,i) => addD(S.ws,i)); }
+function pendingPeople(){ return new Set(Object.values(X().notify||{}).filter(x => x.week===S.ws && (S.loc==="all" || x.loc===S.loc)).map(x => x.staffId)); }
 function weekShifts(){
   const d = weekDays(), mgr = isMgr();
   return allShifts().filter(s => s.date>=d[0] && s.date<=d[6] && (S.loc==="all" || s.loc===S.loc) && (mgr || s.published));
@@ -482,7 +486,7 @@ function vSchedule(){
     <div class="seg" role="group" aria-label="Location">${[{id:"all",name:"All locations"},...locs()].map(l=>`<button data-act="loc" data-loc="${l.id}" aria-pressed="${S.loc===l.id}">${esc(l.name)}</button>`).join("")}</div>
     <span class="spacer"></span>
     ${mgr && canAct() ? `
-      <button class="btn primary" data-act="publish" ${drafts?"":"disabled"}>Publish${drafts?` ${drafts} draft${drafts>1?"s":""}`:""}</button>
+      ${(() => { const pc = pendingPeople().size; return `<button class="btn primary" data-act="publish" ${drafts||pc?"":"disabled"}>Publish${drafts?` ${drafts} draft${drafts>1?"s":""}`:""}${pc?`${drafts?" +":""} changes (${pc})`:""}</button>`; })()}
       <button class="btn" data-act="startStd">Start from standard</button>
       <button class="btn" data-act="autofill" ${openN?"":"disabled"}>Auto-fill open</button>
       <button class="btn" data-act="weekMenu">More</button>` : ""}
@@ -1047,23 +1051,35 @@ const A = {
     if (f.start === f.end) return toast("Start and end can't be the same time.");
     const data = {date:f.date, loc:f.loc, start:f.start, end:f.end, pos:f.pos, breakMin:f.breakMin, staffId:f.staffId, note:f.note};
     closeModal();
-    if (f.id){ await patch(SC(), f.id, toDoc(data)); toast("Shift saved"); return; }
+    if (f.id){ await patch(SC(), f.id, toDoc(S.std ? data : {...data, lastChange:"edit"})); toast("Shift saved"); return; }
     const ws = monday(f.date); const dates = new Set([f.date, ...f.rep.map(i => addD(ws, i))]);
     const n = await many([...dates].map(d => () => put(SC(), gid(), toDoc({...data, date:d, published:false, ts:Date.now()}))));
     toast(S.std ? `Added ${n} standard shift${n>1?"s":""}` : n>1 ? `Added ${n} draft shifts` : "Added as a draft. Publish when the week is ready.");
   },
-  async delShift(el){ const id = el.dataset.id; closeModal(); if (!(await confirmBox("Delete this shift?", S.std ? "It's removed from the standard week. Real weeks aren't affected." : "If it was published, the person loses it from their schedule right away.", "Delete", true))) return; await del(SC(), id); toast("Shift deleted"); },
+  async delShift(el){ const id = el.dataset.id; closeModal(); if (!(await confirmBox("Delete this shift?", S.std ? "It's removed from the standard week. Real weeks aren't affected." : "If it was published, it comes off their schedule right away, and they're texted the next time you publish.", "Delete", true))) return; await del(SC(), id); toast("Shift deleted"); },
   async publish(){
+    const ws = weekShifts(), d = ws.filter(s => !s.published), pend = pendingPeople();
+    if (!d.length && !pend.size) return toast("Nothing new to publish this week.");
+    const prior = ws.some(s => s.published);
+    const changed = new Set([...d.filter(s => s.staffId).map(s => s.staffId), ...pend]);
+    const everyone = new Set([...ws.filter(s => s.staffId).map(s => s.staffId), ...pend]);
+    const what = [d.length ? `${d.length} new shift${d.length>1?"s":""}` : "", pend.size ? `changes for ${pend.size} ${pend.size>1?"people":"person"}` : ""].filter(Boolean).join(" and ");
+    const pl = n => `${n} ${n===1?"person":"people"}`;
+    openModal(`<h3>Publish ${esc(what)}?</h3>${prior ? `<fieldset class="pubmode"><legend>Who gets a text?</legend>
+      <label><input type="radio" name="pubmode" value="changed" checked> Only people whose shifts changed <span class="muted">(${pl(changed.size)})</span></label>
+      <label><input type="radio" name="pubmode" value="all"> Everyone on this week's schedule <span class="muted">(${pl(everyone.size)})</span></label>
+      <label><input type="radio" name="pubmode" value="none"> Don't send texts</label></fieldset>`
+      : `<p class="muted" style="margin:0">Everyone on these shifts gets a text with their schedule for the week (${pl(changed.size)}).</p>`}
+      <div class="acts"><button class="btn" data-act="closeModal">Cancel</button><button class="btn primary" data-act="doPublish">Publish</button></div>`);
+  },
+  async doPublish(){
+    const pick = document.querySelector('input[name="pubmode"]:checked'); const mode = pick ? pick.value : "changed";
+    closeModal();
     const d = weekShifts().filter(s => !s.published);
-    if (!(await confirmBox(`Publish ${d.length} shift${d.length>1?"s":""}?`, "Everyone on these shifts gets a text with their schedule for the week.", "Publish"))) return;
     const n = await many(d.map(s => () => patch("shifts", s.id, {published:true})));
     d.forEach(s => { if (R.shifts[s.id]) R.shifts[s.id].published = true; });
-    toast(`Published ${n} shift${n>1?"s":""}`);
-    if (n && !S.demo) put("publishEvents", gid(), {week:S.ws, locs:[...new Set(d.map(s=>s.loc))], shiftIds:d.map(s=>s.id), by:S.uid||null, ts:Date.now()});
-    if (false) {
-      const locIds = S.loc==="all" ? [...new Set(d.map(s=>s.loc))] : [S.loc];
-      setTimeout(() => saveToDrive(locIds, false, true), 600);
-    }
+    if (!S.demo) await put("publishEvents", gid(), {week:S.ws, locs: S.loc==="all" ? locs().map(l=>l.id) : [S.loc], shiftIds:d.map(s=>s.id), mode, by:S.uid||null, ts:Date.now()});
+    toast(`${n ? `Published ${n} shift${n>1?"s":""}` : "Changes published"}. ${mode==="none" ? "No texts sent." : mode==="all" ? "Texting everyone on the schedule." : "Texting people whose shifts changed."}`);
   },
   async doDrive(el){
     const loc = $("#pr-loc").value; const dEl = $("#pr-drafts"); const withDrafts = !!(dEl && dEl.checked);
@@ -1238,10 +1254,10 @@ const A = {
     if (!s) return toast("That shift no longer exists.");
     if (r.type==="pickup"){
       if (s.staffId) return toast("Someone already has this shift.");
-      await patch("shifts", r.shiftId, {staffId:r.staffId});
+      await patch("shifts", r.shiftId, {staffId:r.staffId, lastChange:"request"});
       for (const o of list("requests")) if (o.id!==r.id && o.shiftId===r.shiftId && o.type==="pickup" && o.status==="pending") await patch("requests", o.id, {status:"denied", decidedTs:Date.now()});
-    } else if (r.type==="drop"){ await patch("shifts", r.shiftId, {staffId:null}); }
-    else if (r.type==="cover"){ await patch("shifts", r.shiftId, {staffId:r.targetId}); }
+    } else if (r.type==="drop"){ await patch("shifts", r.shiftId, {staffId:null, lastChange:"request"}); }
+    else if (r.type==="cover"){ await patch("shifts", r.shiftId, {staffId:r.targetId, lastChange:"request"}); }
     await patch("requests", r.id, {status:"approved", decidedTs:Date.now()});
     toast(r.type==="drop" ? "Approved. The shift is now open." : "Approved and updated on the schedule");
   },
@@ -1299,7 +1315,7 @@ document.addEventListener("drop", async e => {
   const s = shiftById(id); if (!s) return;
   const staffId = td.dataset.staff || null, date = td.dataset.date; const copy = e.altKey || e.ctrlKey || e.metaKey;
   if (copy){ const {...rest} = s; await put(SC(), gid(), toDoc({...rest, staffId, date, published:false, ts:Date.now()})); toast(S.std ? "Copied" : "Copied as a draft"); }
-  else { if (s.staffId === staffId && s.date === date) return; await patch(SC(), id, toDoc({staffId, date})); const w = warnings({...s, id, staffId, date}); toast(w.length ? "Moved. Heads up: " + w[0] : "Shift moved"); }
+  else { if (s.staffId === staffId && s.date === date) return; await patch(SC(), id, toDoc(S.std ? {staffId, date} : {staffId, date, lastChange:"edit"})); const w = warnings({...s, id, staffId, date}); toast(w.length ? "Moved. Heads up: " + w[0] : "Shift moved"); }
 });
 
 /* ---------- data subscriptions ---------- */
@@ -1333,6 +1349,7 @@ async function init(){
   db.collection("emailImports").onSnapshot(snapTo("emailImports"), onErr("emailImports"));
   setTimeout(emailTick, 8000); setInterval(emailTick, 10*60*1000);
   db.collection("requests").onSnapshot(snapTo("requests"), onErr("requests"));
+  db.collection("notify").onSnapshot(snapTo("notify"), onErr("notify"));
   db.collection("messages").orderBy("ts","desc").limit(150).onSnapshot(snapTo("messages"), onErr("messages"));
   subWindow();
 }

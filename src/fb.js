@@ -7,7 +7,7 @@ import {
   collection, doc, query, where, orderBy, limit, onSnapshot, setDoc, updateDoc, deleteDoc,
 } from "./fbapi.js";
 
-const MGR_ONLY = new Set(["standard", "forecast", "emailImports", "diag", "private", "publishEvents", "outbox", "users"]);
+const MGR_ONLY = new Set(["standard", "forecast", "emailImports", "diag", "private", "publishEvents", "outbox", "users", "notify"]);
 
 export function makeShim({ db, user, profile }) {
   const mgr = profile.role === "owner" || profile.role === "manager";

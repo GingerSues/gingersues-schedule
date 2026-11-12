@@ -48,6 +48,7 @@ function seed() {
     },
     timeoff: { t1: { staffId: "e2", from: day(9), to: day(9), status: "pending", note: "private reason", ts: 1 } },
     requests: {}, messages: {}, standard: {}, forecast: {},
+    notify: { [`${day(0)}_e2_liberty`]: { week: day(0), staffId: "e2", loc: "liberty", ts: 1 } },
   };
 }
 
@@ -108,15 +109,31 @@ test("manager: pay and cell stay in /private, publish creates a text event, no D
   assert.equal(await page.locator("#pr-auto").count(), 0);
   await page.locator('#modal [data-act="closeModal"]').first().click();
 
+  // e2's published shift was edited earlier: it counts as a change to text on the next publish.
+  await page.locator('[data-act="publish"]', { hasText: "changes (1)" }).first().waitFor();
   await page.locator('[data-act="publish"]').first().click();
-  await page.locator("#modal").getByText("Everyone on these shifts gets a text").waitFor();
-  await page.locator("#modal button.primary").click();
+  await page.locator("#modal").getByText("Who gets a text?").waitFor();
+  await page.locator("#modal").getByText("Only people whose shifts changed").waitFor();
+  assert.match(await page.locator("#modal").innerText(), /changed\s*\(2 people\)/);
+  await page.locator('#modal input[value="changed"]').check();
+  await page.screenshot({ path: path.join(shots, "publish-choice.png") });
+  await page.locator('#modal [data-act="doPublish"]').click();
   await page.waitForTimeout(400);
   f = await fake(page);
   const ev = Object.values(f.data.publishEvents || {});
   assert.equal(ev.length, 1);
   assert.deepEqual(ev[0].shiftIds, ["s3"]);
+  assert.equal(ev[0].mode, "changed");
   assert.equal(f.data.shifts.s3.published, true);
+
+  // Editing a published shift marks it as an edit (texted at the next publish, not right away).
+  await page.locator('.chip[data-id="s1"]').first().click();
+  await page.locator('#sf-end').fill("15:00");
+  await page.locator('#modal [data-act="saveShift"]').click();
+  await page.waitForTimeout(300);
+  f = await fake(page);
+  assert.equal(f.data.shifts.s1.lastChange, "edit");
+  assert.equal(f.data.shifts.s1.published, true);
   assert.deepEqual(f.denied, []);
   assert.deepEqual(errors, []);
   await ctx.close();

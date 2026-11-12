@@ -131,24 +131,44 @@ exports.onPublish = onDocumentCreated({ document: "publishEvents/{id}", secrets:
   const e = ev.data.data();
   if (!e || !e.week) return;
   const end = core.addD(e.week, 6);
-  const snap = await db.collection("shifts").where("date", ">=", e.week).where("date", "<=", end).get();
+  const locs = e.locs && e.locs.length ? new Set(e.locs) : null;
+  const [snap, notes, staff, config] = await Promise.all([
+    db.collection("shifts").where("date", ">=", e.week).where("date", "<=", end).get(),
+    db.collection("notify").where("week", "==", e.week).get(),
+    loadStaff(), loadConfig(),
+  ]);
   const week = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(s => s.published);
-  const [staff, config] = await Promise.all([loadStaff(), loadConfig()]);
-  await sendTexts(core.publishTexts(e, week, staff, config), "publish");
+  const mine = notes.docs.filter(d => !locs || locs.has(d.data().loc));
+  const changedIds = [...new Set(mine.map(d => d.data().staffId))];
+  await sendTexts(core.publishTexts(e, week, staff, config, changedIds), "publish");
+  const batch = db.batch(); mine.forEach(d => batch.delete(d.ref)); if (mine.length) await batch.commit();
 });
 
+async function noteChanges(before, after) {
+  const notes = core.changeNotes(before, after, core.todayCentral());
+  if (!notes.length) return;
+  const batch = db.batch();
+  notes.forEach(n => batch.set(db.doc(`notify/${n.week}_${n.staffId}_${n.loc}`), { ...n, ts: Date.now() }));
+  await batch.commit();
+}
+
+// Changes from approved requests are texted right away. Manager edits to a published shift are
+// saved up and texted on the next Publish (the manager chooses who gets a text there).
 exports.onShiftUpdate = onDocumentUpdated({ document: "shifts/{id}", secrets: TEXT_SECRETS }, async ev => {
   const before = ev.data.before.data(), after = ev.data.after.data();
   if (!before.published) return;
-  const [staff, config] = await Promise.all([loadStaff(), loadConfig()]);
-  await sendTexts(core.shiftChangeTexts(before, after, staff, config, core.todayCentral()), "shift-change");
+  if (after.lastChange === "request" && before.staffId !== after.staffId) {
+    const [staff, config] = await Promise.all([loadStaff(), loadConfig()]);
+    await sendTexts(core.shiftChangeTexts(before, after, staff, config, core.todayCentral()), "shift-change");
+    return;
+  }
+  await noteChanges(before, after);
 });
 
-exports.onShiftDelete = onDocumentDeleted({ document: "shifts/{id}", secrets: TEXT_SECRETS }, async ev => {
+exports.onShiftDelete = onDocumentDeleted("shifts/{id}", async ev => {
   const before = ev.data.data();
   if (!before || !before.published || !before.staffId) return;
-  const [staff, config] = await Promise.all([loadStaff(), loadConfig()]);
-  await sendTexts(core.shiftChangeTexts(before, null, staff, config, core.todayCentral()), "shift-removed");
+  await noteChanges(before, null);
 });
 
 exports.onTimeoffUpdate = onDocumentUpdated({ document: "timeoff/{id}", secrets: TEXT_SECRETS }, async ev => {

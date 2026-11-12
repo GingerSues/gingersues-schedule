@@ -27,6 +27,33 @@ test("publish texts go only to people with newly published shifts, with their wh
   assert.match(out[0].body, /Reply STOP/);
 });
 
+test("publish modes: changed / all / none, and updated wording", () => {
+  const week = [
+    { id: "1", date: "2026-11-09", start: "06:15", end: "14:00", pos: "Server", loc: "liberty", staffId: "a", published: true },
+    { id: "3", date: "2026-11-10", start: "08:00", end: "14:30", pos: "Cook", loc: "olathe", staffId: "b", published: true },
+  ];
+  const ev = { week: "2026-11-09", shiftIds: [], locs: ["liberty"] };
+  const changed = c.publishTexts(ev, week, staff, config, ["a"]);
+  assert.deepEqual(changed.map(m => m.staffId), ["a"]);
+  assert.match(changed[0].body, /was updated\./);
+  assert.deepEqual(c.publishTexts({ ...ev, mode: "all" }, week, staff, config, []).map(m => m.staffId), ["a"]);
+  assert.deepEqual(c.publishTexts({ ...ev, mode: "all", locs: [] }, week, staff, config, []).map(m => m.staffId).sort(), ["a", "b"]);
+  assert.deepEqual(c.publishTexts({ ...ev, mode: "none" }, week, staff, config, ["a"]), []);
+  const gone = c.publishTexts(ev, week, { ...staff, e: { name: "Eve X" } }, config, ["e"]);
+  assert.match(gone.find(m => m.staffId === "e").body, /no shifts that week/);
+});
+
+test("edits to published shifts are noted for the next publish", () => {
+  const base = { date: "2026-11-12", start: "07:00", end: "14:00", pos: "Server", loc: "liberty", published: true, staffId: "a" };
+  assert.deepEqual(c.changeNotes(base, { ...base, staffId: "b" }, "2026-11-08"),
+    [{ staffId: "a", week: "2026-11-09", loc: "liberty" }, { staffId: "b", week: "2026-11-09", loc: "liberty" }]);
+  assert.deepEqual(c.changeNotes(base, { ...base, end: "15:00" }, "2026-11-08"), [{ staffId: "a", week: "2026-11-09", loc: "liberty" }]);
+  assert.deepEqual(c.changeNotes(base, { ...base, note: "x" }, "2026-11-08"), []);
+  assert.deepEqual(c.changeNotes({ ...base, published: false }, base, "2026-11-08"), []);
+  assert.deepEqual(c.changeNotes(base, null, "2026-11-08"), [{ staffId: "a", week: "2026-11-09", loc: "liberty" }]);
+  assert.equal(c.mondayOf("2026-11-15"), "2026-11-09");
+});
+
 test("shift change texts", () => {
   const today = "2026-11-08";
   const base = { date: "2026-11-10", start: "07:00", end: "14:00", pos: "Server", loc: "liberty", published: true };

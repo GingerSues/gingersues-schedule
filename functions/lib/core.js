@@ -17,6 +17,7 @@ function fmtT(t) {
   return m ? `${h}:${String(m).padStart(2, "0")}${ap}` : `${h}${ap}`;
 }
 function fmtDay(s) { const d = parse(s); return `${DAYS[d.getUTCDay()]} ${d.getUTCMonth() + 1}/${d.getUTCDate()}`; }
+function mondayOf(s) { const d = parse(s); const back = (d.getUTCDay() + 6) % 7; d.setUTCDate(d.getUTCDate() - back); return d.toISOString().slice(0, 10); }
 function fmtMonthDay(s) { const d = parse(s); return `${d.toLocaleString("en-US", { month: "short", timeZone: "UTC" })} ${d.getUTCDate()}`; }
 function todayCentral(now = new Date()) {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Chicago", year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
@@ -28,28 +29,51 @@ function shiftLine(s, config, withLoc) {
 const byTime = (a, b) => a.date.localeCompare(b.date) || String(a.start).localeCompare(String(b.start));
 
 /**
- * Texts for a publish. Everyone with a newly published shift gets their whole week.
- * @param ev {week, shiftIds}
- * @param weekShifts published shifts in that week (all stores), each {id, date, start, end, pos, loc, staffId}
+ * Texts for a publish. Each person texted gets their whole week (all stores).
+ * @param ev {week, shiftIds, mode: "changed" | "all" | "none", locs}
+ * @param weekShifts published shifts in that week (all stores)
  * @param staff map id -> staff doc
+ * @param changedIds staff ids whose published shifts were edited since the last publish
  */
-function publishTexts(ev, weekShifts, staff, config) {
+function publishTexts(ev, weekShifts, staff, config, changedIds = []) {
+  const mode = ev.mode || "changed";
+  if (mode === "none") return [];
   const fresh = new Set(ev.shiftIds || []);
-  const people = new Set(weekShifts.filter(s => fresh.has(s.id) && s.staffId).map(s => s.staffId));
+  const locs = ev.locs && ev.locs.length ? new Set(ev.locs) : null;
+  const updated = new Set(changedIds);
+  const people = new Set([...weekShifts.filter(s => fresh.has(s.id) && s.staffId).map(s => s.staffId), ...updated]);
+  if (mode === "all") weekShifts.filter(s => s.staffId && (!locs || locs.has(s.loc))).forEach(s => people.add(s.staffId));
   const out = [];
   for (const id of people) {
     const st = staff[id]; if (!st || st.active === false) continue;
     const mine = weekShifts.filter(s => s.staffId === id).sort(byTime);
-    const multi = new Set(mine.map(s => s.loc)).size > 1;
     const first = (st.name || "").split(" ")[0];
+    const verb = updated.has(id) ? "was updated" : "is posted";
+    if (!mine.length) {
+      out.push({ staffId: id, body: `Ginger Sue's: Hi ${first}, your schedule for the week of ${fmtMonthDay(ev.week)} was updated. You have no shifts that week.\n${SITE}\nReply STOP to opt out.` });
+      continue;
+    }
+    const multi = new Set(mine.map(s => s.loc)).size > 1;
     const lines = mine.map(s => shiftLine(s, config, multi));
     const where = multi ? "" : ` at ${locName(config, mine[0].loc)}`;
     out.push({
       staffId: id,
-      body: `Ginger Sue's: Hi ${first}, your schedule for the week of ${fmtMonthDay(ev.week)}${where} is posted.\n${lines.join("\n")}\n${SITE}\nReply STOP to opt out.`,
+      body: `Ginger Sue's: Hi ${first}, your schedule for the week of ${fmtMonthDay(ev.week)}${where} ${verb}.\n${lines.join("\n")}\n${SITE}\nReply STOP to opt out.`,
     });
   }
   return out;
+}
+
+/** Who to note for the next publish when a published shift is edited (not texted right away). */
+function changeNotes(before, after, today) {
+  if (!before || !before.published) return [];
+  if (after && !after.published) return [];
+  if (after && !CHANGE_KEYS.some(k => (before[k] || null) !== (after[k] || null))) return [];
+  const notes = [];
+  if (before.staffId && before.date >= today) notes.push({ staffId: before.staffId, week: mondayOf(before.date), loc: before.loc });
+  if (after && after.staffId && after.date >= today) notes.push({ staffId: after.staffId, week: mondayOf(after.date), loc: after.loc });
+  const seen = new Set();
+  return notes.filter(n => { const k = `${n.week}_${n.staffId}_${n.loc}`; if (seen.has(k)) return false; seen.add(k); return true; });
 }
 
 const CHANGE_KEYS = ["staffId", "date", "start", "end", "loc", "pos"];
@@ -110,5 +134,5 @@ function decideRole({ phone, ownerPhones, staffMatch }) {
 
 module.exports = {
   SITE, normPhone, addD, fmtT, fmtDay, todayCentral, shiftLine,
-  publishTexts, shiftChangeTexts, timeoffText, coverAskText, requestUpdateTexts, decideRole,
+  publishTexts, changeNotes, mondayOf, shiftChangeTexts, timeoffText, coverAskText, requestUpdateTexts, decideRole,
 };

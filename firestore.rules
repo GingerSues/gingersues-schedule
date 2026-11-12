@@ -93,6 +93,11 @@ service cloud.firestore {
       allow read: if isMgr();
     }
 
+    match /notify/{id} {
+      allow read: if isMgr();
+      allow delete: if isMgr();
+    }
+
     match /{col}/{id} {
       allow read, write: if isMgr() && col in ['standard', 'forecast', 'emailImports', 'diag'];
     }

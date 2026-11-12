@@ -43,11 +43,50 @@ h = (
 sub("\n<script>\n(() => {", "\n<script>window.GSS_FIREBASE = true; window.__gssReady = new Promise(r => window.__gssResolve = r);</script>\n<script type=\"module\" src=\"/fb.js\"></script>\n<script>\n(() => {")
 sub("\ninit();\n})();", "\nwindow.__gssReady.then(init);\n})();")
 
-# 3. Publishing sends texts instead of saving to Google Drive.
-sub('"Staff will see these on their schedule the next time they open this page."',
-    '"Everyone on these shifts gets a text with their schedule for the week."')
-sub("if (n && !S.demo && driveAuto()) {",
-    "if (n && !S.demo) put(\"publishEvents\", gid(), {week:S.ws, locs:[...new Set(d.map(s=>s.loc))], shiftIds:d.map(s=>s.id), by:S.uid||null, ts:Date.now()});\n    if (false) {")
+# 3. Publishing sends texts instead of saving to Google Drive. Edits to published shifts are
+#    collected (in "notify", written by Cloud Functions) and texted on the next Publish, where the
+#    manager picks who gets a text: only people with changes, everyone, or nobody.
+sub(r"(?s)  async publish\(\)\{\n.*?\n  \},\n  async doDrive", r"""  async publish(){
+    const ws = weekShifts(), d = ws.filter(s => !s.published), pend = pendingPeople();
+    if (!d.length && !pend.size) return toast("Nothing new to publish this week.");
+    const prior = ws.some(s => s.published);
+    const changed = new Set([...d.filter(s => s.staffId).map(s => s.staffId), ...pend]);
+    const everyone = new Set([...ws.filter(s => s.staffId).map(s => s.staffId), ...pend]);
+    const what = [d.length ? `${d.length} new shift${d.length>1?"s":""}` : "", pend.size ? `changes for ${pend.size} ${pend.size>1?"people":"person"}` : ""].filter(Boolean).join(" and ");
+    const pl = n => `${n} ${n===1?"person":"people"}`;
+    openModal(`<h3>Publish ${esc(what)}?</h3>${prior ? `<fieldset class="pubmode"><legend>Who gets a text?</legend>
+      <label><input type="radio" name="pubmode" value="changed" checked> Only people whose shifts changed <span class="muted">(${pl(changed.size)})</span></label>
+      <label><input type="radio" name="pubmode" value="all"> Everyone on this week's schedule <span class="muted">(${pl(everyone.size)})</span></label>
+      <label><input type="radio" name="pubmode" value="none"> Don't send texts</label></fieldset>`
+      : `<p class="muted" style="margin:0">Everyone on these shifts gets a text with their schedule for the week (${pl(changed.size)}).</p>`}
+      <div class="acts"><button class="btn" data-act="closeModal">Cancel</button><button class="btn primary" data-act="doPublish">Publish</button></div>`);
+  },
+  async doPublish(){
+    const pick = document.querySelector('input[name="pubmode"]:checked'); const mode = pick ? pick.value : "changed";
+    closeModal();
+    const d = weekShifts().filter(s => !s.published);
+    const n = await many(d.map(s => () => patch("shifts", s.id, {published:true})));
+    d.forEach(s => { if (R.shifts[s.id]) R.shifts[s.id].published = true; });
+    if (!S.demo) await put("publishEvents", gid(), {week:S.ws, locs: S.loc==="all" ? locs().map(l=>l.id) : [S.loc], shiftIds:d.map(s=>s.id), mode, by:S.uid||null, ts:Date.now()});
+    toast(`${n ? `Published ${n} shift${n>1?"s":""}` : "Changes published"}. ${mode==="none" ? "No texts sent." : mode==="all" ? "Texting everyone on the schedule." : "Texting people whose shifts changed."}`);
+  },
+  async doDrive""", regex=True)
+sub("function weekShifts(){", """function pendingPeople(){ return new Set(Object.values(X().notify||{}).filter(x => x.week===S.ws && (S.loc==="all" || x.loc===S.loc)).map(x => x.staffId)); }
+function weekShifts(){""")
+sub('<button class="btn primary" data-act="publish" ${drafts?"":"disabled"}>Publish${drafts?` ${drafts} draft${drafts>1?"s":""}`:""}</button>',
+    '${(() => { const pc = pendingPeople().size; return `<button class="btn primary" data-act="publish" ${drafts||pc?"":"disabled"}>Publish${drafts?` ${drafts} draft${drafts>1?"s":""}`:""}${pc?`${drafts?" +":""} changes (${pc})`:""}</button>`; })()}')
+sub('.checks{display:flex;flex-wrap:wrap;gap:6px}', '.checks{display:flex;flex-wrap:wrap;gap:6px}\n.pubmode{border:1px solid var(--line);border-radius:10px;padding:8px 12px 10px;margin:4px 0 0;display:grid;gap:8px}\n.pubmode legend{font-weight:600;padding:0 4px}\n.pubmode label{display:flex;gap:8px;align-items:baseline;cursor:pointer}')
+sub('const R = {config:null, staff:{}, shifts:{}, standard:{}, timeoff:{}, requests:{}, messages:{}, forecast:{}, emailImports:{}};',
+    'const R = {config:null, staff:{}, shifts:{}, standard:{}, timeoff:{}, requests:{}, messages:{}, forecast:{}, emailImports:{}, notify:{}};')
+sub('  db.collection("requests").onSnapshot(snapTo("requests"), onErr("requests"));',
+    '  db.collection("requests").onSnapshot(snapTo("requests"), onErr("requests"));\n  db.collection("notify").onSnapshot(snapTo("notify"), onErr("notify"));')
+# Request approvals text right away; manager edits wait for the next Publish.
+sub('await patch("shifts", r.shiftId, {staffId:r.staffId});', 'await patch("shifts", r.shiftId, {staffId:r.staffId, lastChange:"request"});')
+sub('await patch("shifts", r.shiftId, {staffId:null}); }', 'await patch("shifts", r.shiftId, {staffId:null, lastChange:"request"}); }')
+sub('await patch("shifts", r.shiftId, {staffId:r.targetId}); }', 'await patch("shifts", r.shiftId, {staffId:r.targetId, lastChange:"request"}); }')
+sub('if (f.id){ await patch(SC(), f.id, toDoc(data));', 'if (f.id){ await patch(SC(), f.id, toDoc(S.std ? data : {...data, lastChange:"edit"}));')
+sub('await patch(SC(), id, toDoc({staffId, date}));', 'await patch(SC(), id, toDoc(S.std ? {staffId, date} : {staffId, date, lastChange:"edit"}));')
+sub('"If it was published, the person loses it from their schedule right away."', '"If it was published, it comes off their schedule right away, and they\'re texted the next time you publish."')
 sub(r'\n    <div class="checks"><label><input type="checkbox" id="pr-auto".*?</label></div>', "", regex=True)
 sub('<button class="btn" data-act="doDrive">Save to Google Drive</button>', "")
 
